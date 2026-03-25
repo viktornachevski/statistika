@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="bs">
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+   <title>Handball ProStat V15 Elite</title>
+   <!-- Tailwind CSS (Provjereni CDN) -->
+   <script src="https://cdn.tailwindcss.com"></script>
+   <style>
+       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+       
+       body {
+           font-family: 'Inter', sans-serif;
+           background-color: #020617;
+           color: #f8fafc;
+           margin: 0;
+           overflow: hidden;
+           height: 100vh;
+           user-select: none;
+           -webkit-tap-highlight-color: transparent;
+       }
+
+       .active-btn { background-color: #4f46e5 !important; border-color: white !important; box-shadow: 0 0 15px rgba(79, 70, 229, 0.4); }
+       
+       /* Teren stilovi */
+       .court-bg { background-color: #065f46; position: relative; width: 100%; aspect-ratio: 4/3; border-radius: 20px; border: 4px solid rgba(255,255,255,0.2); overflow: hidden; touch-action: none; }
+       .court-svg { width: 100%; height: 100%; }
+
+       /* Modal stilovi */
+       .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+       .modal-overlay.active { display: flex; }
+       .modal-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 30px; padding: 30px; width: 100%; max-width: 900px; display: flex; gap: 30px; }
+
+       /* Zapisnik stilovi */
+       #report-view { display: none; background: white; color: #111827; padding: 40px; overflow-y: auto; height: 100%; }
+       
+       @media print {
+           .no-print { display: none !important; }
+           #report-view { display: block !important; position: absolute; top: 0; left: 0; width: 100%; }
+       }
+
+       .custom-scroll::-webkit-scrollbar { width: 4px; }
+       .custom-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+   </style>
+</head>
+<body>
+
+   <!-- ZAGLAVLJE -->
+   <header class="h-[15vh] bg-[#0f172a] border-b border-[#1e293b] flex items-center justify-between px-8 no-print">
+       <div class="text-xl font-black italic tracking-tighter">PROSTAT <span class="text-indigo-500">V15</span></div>
+       <div class="text-center flex-1">
+           <div class="text-[10px] font-bold opacity-50 uppercase tracking-widest mb-1">Domaći - Gosti</div>
+           <div class="text-5xl font-black tabular-nums" id="score-board">0 : 0</div>
+       </div>
+       <div class="text-center">
+           <div class="bg-black px-6 py-2 rounded-xl border border-[#1e293b] text-3xl font-mono font-bold" id="timer-display">00:00</div>
+           <button class="text-[10px] font-black mt-1 uppercase text-green-500" id="timer-btn">POKRENI</button>
+       </div>
+   </header>
+
+   <!-- GLAVNI SADRŽAJ -->
+   <main class="flex h-[75vh] no-print">
+       <!-- Rosteri -->
+       <aside class="w-72 bg-[#0f172a]/50 border-r border-[#1e293b] p-4 overflow-y-auto custom-scroll" id="roster-sidebar">
+           <!-- Dinamički generisano -->
+       </aside>
+
+       <!-- Akcije -->
+       <section class="flex-1 p-6 flex flex-col gap-6 overflow-hidden">
+           <div class="bg-[#0f172a]/60 p-4 rounded-3xl border border-[#1e293b]">
+               <div class="grid grid-cols-5 gap-2" id="defense-selector">
+                   <!-- Dugmad za odbranu -->
+               </div>
+           </div>
+
+           <div class="grid grid-cols-3 gap-3" id="action-grid">
+               <!-- Glavne akcije -->
+           </div>
+
+           <div class="flex-1 bg-black/20 rounded-[2.5rem] border border-[#1e293b] p-5 overflow-y-auto custom-scroll font-bold text-slate-500 text-xs italic" id="timeline-feed">
+               Meč još nije počeo...
+           </div>
+       </section>
+   </main>
+
+   <!-- ZAPISNIK -->
+   <div id="report-view" class="custom-scroll">
+       <!-- Dinamički generisan izvještaj -->
+   </div>
+
+   <!-- NAVIGACIJA -->
+   <footer class="h-[10vh] bg-[#0f172a] border-t border-[#1e293b] flex justify-around items-center no-print">
+       <button class="bg-[#1e293b] px-10 py-3 rounded-xl font-black text-xs" onclick="switchTab('live')">UŽIVO</button>
+       <button class="bg-[#1e293b] px-10 py-3 rounded-xl font-black text-xs" onclick="switchTab('report')">ZAPISNIK</button>
+   </footer>
+
+   <!-- MODAL ZA ŠUT -->
+   <div class="modal-overlay" id="shot-modal">
+       <div class="modal-card">
+           <div class="flex-1 flex flex-col gap-6">
+               <h2 class="text-3xl font-black italic text-indigo-400 uppercase">Analiza Šuta</h2>
+               <div class="bg-black p-4 rounded-xl border border-[#1e293b]">
+                   <label class="text-[10px] font-black text-slate-500 block mb-1 uppercase">Broj Akcije</label>
+                   <input type="number" id="action-num-input" class="bg-transparent text-white text-3xl font-black w-full outline-none" placeholder="00">
+               </div>
+               <div class="grid grid-cols-5 gap-1" id="zone-btns">
+                   <!-- Dugmad zona -->
+               </div>
+               <div class="grid grid-cols-2 gap-2" id="outcome-btns">
+                   <!-- Ishodi -->
+               </div>
+               <button class="bg-[#1e293b] py-3 rounded-xl font-black text-xs mt-auto" onclick="closeModal()">ZATVORI</button>
+           </div>
+           <div class="w-[450px] flex flex-col gap-3">
+               <div id="modal-court-container" class="court-bg"></div>
+               <p id="shot-warning" class="text-orange-500 text-center font-black text-[10px] uppercase animate-pulse hidden">Označi poziciju na terenu!</p>
+           </div>
+       </div>
+   </div>
+
+   <script>
+       // --- STANJE APLIKACIJE ---
+       const state = {
+           time: 0,
+           running: false,
+           score: [0, 0],
+           selectedPlayerId: null,
+           activeDefense: '6-0',
+           defenseStats: { '6-0': {t:0, g:0, n:0}, '5-1': {t:0, g:0, n:0}, '4-2': {t:0, g:0, n:0}, '3-3': {t:0, g:0, n:0}, 'FL': {t:0, g:0, n:0} },
+           modalShot: { x: null, y: null, zone: '9m' },
+           players: {
+               home: [
+                   { id: 'h1', name: 'Golman Domaći', num: '1', gk: true, saves: 0, positions: [] },
+                   { id: 'h2', name: 'Marko Marković', num: '7', g: 0, s: 0, as: 0, bl: 0, st: 0, to: 0, m: 0, shots: [] },
+                   { id: 'h3', name: 'Ivan Ivić', num: '10', g: 0, s: 0, as: 0, bl: 0, st: 0, to: 0, m: 0, shots: [] }
+               ],
+               away: [
+                   { id: 'a1', name: 'Golman Gosti', num: '12', gk: true, saves: 0, positions: [] },
+                   { id: 'a2', name: 'Petar Petrović', num: '5', g: 0, s: 0, as: 0, bl: 0, st: 0, to: 0, m: 0, shots: [] }
+               ]
+           },
+           history: []
+       };
+
+       // --- POMOĆNE FUNKCIJE ---
+       const formatTime = (s) => `${Math.floor(s/60).toString().padStart(2,'0')}:${(s%60).toString().padStart(2,'0')}`;
+       const getPlayer = (id) => state.players.home.find(p => p.id === id) || state.players.away.find(p => p.id === id);
+
+       // --- CRTANJE TERENA (SVG) ---
+       const drawCourt = (containerId, points = [], isGK = false, interactive = false) => {
+           const container = document.getElementById(containerId);
+           container.innerHTML = '';
+           
+           const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+           svg.setAttribute("viewBox", "0 0 400 300");
+           svg.setAttribute("class", "court-svg");
+
+           // Linije
+           const p6m = document.createElementNS("http://www.w3.org/2000/svg", "path");
+           p6m.setAttribute("d", "M 80 0 A 120 120 0 0 0 320 0");
+           p6m.setAttribute("fill", "none"); p6m.setAttribute("stroke", "white"); p6m.setAttribute("stroke-width", "4");
+           svg.appendChild(p6m);
+
+           const p9m = document.createElementNS("http://www.w3.org/2000/svg", "path");
+           p9m.setAttribute("d", "M 30 0 A 170 170 0 0 0 370 0");
+           p9m.setAttribute("fill", "none"); p9m.setAttribute("stroke", "rgba(255,255,255,0.4)"); p9m.setAttribute("stroke-width", "2"); p9m.setAttribute("stroke-dasharray", "8,8");
+           svg.appendChild(p9m);
+
+           const line7 = document.createElementNS("http://www.w3.org/2000/svg", "line");
+           line7.setAttribute("x1", "185"); line7.setAttribute("y1", "130"); line7.setAttribute("x2", "215"); line7.setAttribute("y2", "130");
+           line7.setAttribute("stroke", "white"); line7.setAttribute("stroke-width", "4"); line7.setAttribute("opacity", "0.6");
+           svg.appendChild(line7);
+
+           // Gol
+           const goal = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+           goal.setAttribute("x", "150"); goal.setAttribute("y", "0"); goal.setAttribute("width", "100"); goal.setAttribute("height", "8"); goal.setAttribute("fill", "#000");
+           svg.appendChild(goal);
+
+           // Tačke
+           points.forEach(p => {
+               const c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+               c.setAttribute("cx", p.x * 4); c.setAttribute("cy", p.y * 3); c.setAttribute("r", 8);
+               let color = "white";
+               if(isGK) color = p.saved ? "#3b82f6" : "#ef4444";
+               else if(p.res === 'gol') color = "#22c55e";
+               else if(p.res === 'obr') color = "#3b82f6";
+               c.setAttribute("fill", color); c.setAttribute("stroke", "white"); c.setAttribute("stroke-width", "2");
+               svg.appendChild(c);
+           });
+
+           if(interactive) {
+               container.onpointerdown = (e) => {
+                   const r = container.getBoundingClientRect();
+                   state.modalShot.x = ((e.clientX - r.left) / r.width) * 100;
+                   state.modalShot.y = ((e.clientY - r.top) / r.height) * 100;
+                   document.getElementById('shot-warning').classList.add('hidden');
+                   drawCourt(containerId, [{x: state.modalShot.x, y: state.modalShot.y}], false, true);
+               };
+           }
+           container.appendChild(svg);
+       };
+
+       // --- RENDERERI ---
+       const renderRosters = () => {
+           const side = document.getElementById('roster-sidebar');
+           side.innerHTML = '';
+           ['home', 'away'].forEach(team => {
+               const h = document.createElement('p');
+               h.className = `text-[10px] font-black mb-3 tracking-widest ${team==='home'?'text-indigo-400':'text-pink-400'}`;
+               h.innerText = team === 'home' ? 'DOMAĆI' : 'GOSTI';
+               side.appendChild(h);
+               
+               state.players[team].forEach(p => {
+                   const b = document.createElement('button');
+                   b.className = `w-full p-4 rounded-xl border-2 text-left mb-1 flex justify-between items-center transition-all ${state.selectedPlayerId === p.id ? 'active-btn' : 'bg-slate-800/40 border-slate-800 text-slate-300'}`;
+                   b.innerHTML = `<span class="font-black text-sm">${p.num}. ${p.name}</span> ${p.gk ? '<span class="text-[8px] opacity-50 font-black">GK</span>' : ''}`;
+                   b.onclick = () => { state.selectedPlayerId = p.id; renderRosters(); renderActions(); };
+                   side.appendChild(b);
+               });
+           });
+       };
+
+       const renderDefense = () => {
+           const div = document.getElementById('defense-selector');
+           div.innerHTML = '';
+           Object.keys(state.defenseStats).forEach(d => {
+               const b = document.createElement('button');
+               b.className = `py-3 rounded-xl border-2 font-black text-[10px] ${state.activeDefense === d ? 'active-btn' : 'bg-slate-800 border-slate-700 text-slate-600'}`;
+               b.innerText = d;
+               b.onclick = () => { state.activeDefense = d; renderDefense(); };
+               div.appendChild(b);
+           });
+       };
+
+       const renderActions = () => {
+           const div = document.getElementById('action-grid');
+           div.innerHTML = '';
+           const actions = [
+               {id:'shot', l:'GOL / ŠUT', c:'emerald'}, {id:'asist', l:'ASISTENCIJA', c:'indigo'},
+               {id:'block', l:'BLOKADA', c:'cyan'}, {id:'steal', l:'UKRADENA', c:'teal'},
+               {id:'turnover', l:'IZG. LOPTA', c:'red'}, {id:'2min', l:'2 MINUTA', c:'orange'}
+           ];
+           actions.forEach(a => {
+               const b = document.createElement('button');
+               b.disabled = !state.selectedPlayerId;
+               b.className = `h-28 rounded-3xl border-2 flex flex-col items-center justify-center font-black text-[10px] transition-all disabled:opacity-5 active:scale-95 bg-${a.c}-600/10 border-${a.c}-600/30 text-${a.c}-400 shadow-xl`;
+               b.innerText = a.l;
+               b.onclick = () => handleAction(a.id);
+               div.appendChild(b);
+           });
+       };
+
+       const handleAction = (id) => {
+           if(id === 'shot') {
+               state.modalShot = { x: null, y: null, zone: '9m' };
+               document.getElementById('shot-modal').classList.add('active');
+               document.getElementById('action-num-input').value = '';
+               renderModalControls();
+               drawCourt('modal-court-container', [], false, true);
+           } else {
+               saveAction(id);
+           }
+       };
+
+       const renderModalControls = () => {
+           const zones = document.getElementById('zone-btns');
+           zones.innerHTML = '';
+           ['9m', '6m', 'krilo', '7m', 'prolaz'].forEach(z => {
+               const b = document.createElement('button');
+               b.className = `py-3 rounded-xl border-2 font-black text-[10px] uppercase ${state.modalShot.zone === z ? 'active-btn' : 'bg-slate-800 border-slate-700 text-slate-500'}`;
+               b.innerText = z;
+               b.onclick = () => { state.modalShot.zone = z; renderModalControls(); };
+               zones.appendChild(b);
+           });
+
+           const out = document.getElementById('outcome-btns');
+           out.innerHTML = '';
+           [{id:'gol',l:'GOL',c:'emerald'}, {id:'obr',l:'ODBRANA',c:'blue'}, {id:'okv',l:'OKVIR',c:'orange'}, {id:'mim',l:'MIMO',c:'slate'}].forEach(o => {
+               const b = document.createElement('button');
+               b.className = `py-4 rounded-xl border-2 font-black text-xs bg-${o.c}-600/20 border-${o.c}-500 text-${o.c}-400`;
+               b.innerText = o.l;
+               b.onclick = () => submitShot(o.id);
+               out.appendChild(b);
+           });
+       };
+
+       const saveAction = (type) => {
+           const p = getPlayer(state.selectedPlayerId);
+           if(type === 'asist') p.as++; else if(type === 'block') p.bl++; else if(type === 'steal') p.st++; else if(type === 'turnover') p.to++; else if(type === '2min') p.m++;
+           addFeed(`${p.name}: ${type.toUpperCase()}`);
+           state.selectedPlayerId = null;
+           updateUI();
+       };
+
+       const submitShot = (res) => {
+           if(state.modalShot.x === null) { document.getElementById('shot-warning').classList.remove('hidden'); return; }
+           const p = getPlayer(state.selectedPlayerId);
+           const team = state.players.home.includes(p) ? 'home' : 'away';
+           const nasGK = state.players[team === 'home' ? 'away' : 'home'].find(x => x.gk);
+           const akc = document.getElementById('action-num-input').value;
+
+           p.s++;
+           if(res === 'gol') {
+               p.g++;
+               team === 'home' ? state.score[0]++ : state.score[1]++;
+               state.defenseStats[state.activeDefense].g++;
+           }
+           p.shots.push({ ...state.modalShot, res, akc });
+           
+           if(nasGK && (res === 'gol' || res === 'obr')) {
+               if(res === 'obr') nasGK.saves++;
+               nasGK.positions.push({ x: state.modalShot.x, y: state.modalShot.y, saved: res === 'obr' });
+           }
+
+           state.defenseStats[state.activeDefense].n++;
+           addFeed(`${p.name}: ${res.toUpperCase()} ${akc ? `(A:${akc})` : ''}`);
+           closeModal();
+           updateUI();
+       };
+
+       const updateUI = () => {
+           document.getElementById('score-board').innerText = `${state.score[0]} : ${state.score[1]}`;
+           renderRosters();
+           renderActions();
+       };
+
+       const addFeed = (m) => {
+           state.history.unshift(`[${formatTime(state.time)}] ${m}`);
+           document.getElementById('timeline-feed').innerHTML = state.history.join('<br>');
+       };
+
+       const switchTab = (tab) => {
+           document.getElementById('live-content')?.classList.toggle('hidden', tab !== 'live');
+           document.getElementById('report-view').style.display = tab === 'report' ? 'block' : 'none';
+           if(tab === 'report') renderReport();
+       };
+
+       const closeModal = () => document.getElementById('shot-modal').classList.remove('active');
+
+       // --- IZVJEŠTAJ ---
+       const renderReport = () => {
+           const v = document.getElementById('report-view');
+           v.innerHTML = `
+               <div class="flex justify-between items-end border-b-8 border-slate-950 pb-8 mb-16 italic font-black">
+                   <div><h1 class="text-6xl tracking-tighter">ZAPISNIK</h1><p class="text-slate-400 text-sm mt-2 uppercase">V15 Elite Scouting</p></div>
+                   <div class="text-8xl">${state.score[0]} : ${state.score[1]}</div>
+               </div>
+               
+               <h2 class="text-3xl font-black uppercase mb-10 border-l-8 border-blue-600 pl-6 italic">Analiza Golmana</h2>
+               <div class="grid grid-cols-2 gap-10 mb-20">
+                   ${state.players.home.concat(state.players.away).filter(p=>p.gk).map(gk => `
+                       <div class="bg-slate-50 p-8 rounded-[4rem] border">
+                           <h3 class="text-2xl font-black uppercase italic mb-6 underline">${gk.name} (Odbrane: ${gk.saves})</h3>
+                           <div id="gk-map-${gk.id}"></div>
+                       </div>
+                   `).join('')}
+               </div>
+
+               <h2 class="text-3xl font-black uppercase mb-10 border-l-8 border-green-600 pl-6 italic">Učinak Igrača</h2>
+               ${['home', 'away'].map(t => state.players[t].filter(p=>!p.gk).map(p => `
+                   <div class="grid grid-cols-2 gap-12 border-b-4 border-slate-50 pb-12 mb-12">
+                       <div>
+                           <div class="flex items-center gap-6 mb-6"><span class="text-8xl font-black text-slate-100 italic leading-none">#${p.num}</span><h4 class="text-4xl font-black italic uppercase">${p.name}</h4></div>
+                           <div class="grid grid-cols-3 gap-2 mb-6 font-black italic text-center">
+                               <div class="bg-slate-50 p-4 rounded-3xl"><p class="text-[10px] text-slate-400 uppercase">G/Š</p><p class="text-2xl">${p.g}/${p.s}</p></div>
+                               <div class="bg-slate-50 p-4 rounded-3xl"><p class="text-[10px] text-slate-400 uppercase">Asist</p><p class="text-2xl text-indigo-600">${p.as}</p></div>
+                               <div class="bg-slate-50 p-4 rounded-3xl"><p class="text-[10px] text-slate-400 uppercase">Izg.</p><p class="text-2xl text-red-500">${p.to}</p></div>
+                           </div>
+                           <div class="p-6 bg-indigo-50 rounded-[2.5rem] border border-indigo-100 text-xs font-black italic text-indigo-700">AKCIJE: ${p.shots.filter(s=>s.res==='gol').map(s=>s.akc).filter(a=>a!=='').join(', ') || '/'}</div>
+                       </div>
+                       <div id="p-map-${p.id}" class="bg-slate-50 p-4 rounded-[3rem] border shadow-sm"></div>
+                   </div>
+               `).join('')).join('')}
+               <button onclick="window.print()" class="w-full bg-slate-950 text-white py-10 rounded-[5rem] font-black uppercase italic shadow-2xl no-print hover:bg-indigo-600 transition-all">Export PDF</button>
+           `;
+           setTimeout(() => {
+               state.players.home.concat(state.players.away).forEach(p => {
+                   const id = p.gk ? `gk-map-${p.id}` : `p-map-${p.id}`;
+                   drawCourt(id, p.gk ? p.positions : p.shots, p.gk);
+               });
+           }, 200);
+       };
+
+       // --- INIT ---
+       document.getElementById('timer-btn').onclick = () => {
+           state.running = !state.running;
+           document.getElementById('timer-btn').innerText = state.running ? "PAUZA" : "POKRENI";
+           document.getElementById('timer-btn').classList.toggle('text-red-500', state.running);
+           document.getElementById('timer-btn').classList.toggle('text-green-500', !state.running);
+       };
+
+       setInterval(() => {
+           if(state.running) document.getElementById('timer-display').innerText = formatTime(state.time);
+       }, 1000);
+
+       window.onload = () => { renderRosters(); renderDefense(); renderActions(); };
+   </script>
+</body>
+</html>
