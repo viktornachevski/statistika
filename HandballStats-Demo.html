@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#0A0E17" />
+<title>HandballStats Pro</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; }
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: #0A0E17;
+    color: #F0F4F8;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  input, select, button { font-family: inherit; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2A3544; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ─── LOCAL STORAGE DB ────────────────────────────────────────
+const DB = {
+  _get(key) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } },
+  _set(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch { return false; } },
+  _del(key) { try { localStorage.removeItem(key); return true; } catch { return false; } },
+  async saveMatch(match) {
+    this._set(`match:${match.id}`, match);
+    const idx = this._get("match_index") || [];
+    if (!idx.includes(match.id)) { idx.push(match.id); this._set("match_index", idx); }
+  },
+  async getMatch(id) { return this._get(`match:${id}`); },
+  async getAllMatches() {
+    const idx = this._get("match_index") || [];
+    return idx.map(id => this._get(`match:${id}`)).filter(Boolean).sort((a, b) => new Date(b.date) - new Date(a.date));
+  },
+  async deleteMatch(id) {
+    this._del(`match:${id}`);
+    const idx = (this._get("match_index") || []).filter(i => i !== id);
+    this._set("match_index", idx);
+  },
+  async saveTeamTemplate(tmpl) {
+    this._set(`team:${tmpl.id}`, tmpl);
+    const idx = this._get("team_index") || [];
+    if (!idx.includes(tmpl.id)) { idx.push(tmpl.id); this._set("team_index", idx); }
+  },
+  async getAllTeams() {
+    const idx = this._get("team_index") || [];
+    return idx.map(id => this._get(`team:${id}`)).filter(Boolean);
+  },
+};
+
+// ─── CONSTANTS ───────────────────────────────────────────────
+const EVENT_TYPES = {
+  GOAL: { id: "goal", label: "Gol", icon: "⚽", color: "#00E676", category: "offense" },
+  ASSIST: { id: "assist", label: "Asistencija", icon: "🤝", color: "#448AFF", category: "offense" },
+  SHOT_MISSED: { id: "shot_missed", label: "Promašaj", icon: "✖", color: "#FF5252", category: "offense" },
+  SHOT_BLOCKED: { id: "shot_blocked", label: "Blokirani šut", icon: "🛡", color: "#FF9100", category: "offense" },
+  SHOT_POST: { id: "shot_post", label: "Stativa", icon: "🥅", color: "#FFD740", category: "offense" },
+  SAVE: { id: "save", label: "Odbrana", icon: "🧤", color: "#00BFA5", category: "defense" },
+  STEAL: { id: "steal", label: "Ukradena lopta", icon: "🏃", color: "#7C4DFF", category: "defense" },
+  BLOCK: { id: "block", label: "Blokada", icon: "✋", color: "#E040FB", category: "defense" },
+  TURNOVER: { id: "turnover", label: "Izgubljena lopta", icon: "💫", color: "#FF6E40", category: "offense" },
+  FOUL_COMMITTED: { id: "foul_committed", label: "Napravljeni faul", icon: "⚠", color: "#FFAB40", category: "foul" },
+  FOUL_RECEIVED: { id: "foul_received", label: "Pretrpljeni faul", icon: "💥", color: "#40C4FF", category: "foul" },
+  YELLOW_CARD: { id: "yellow_card", label: "Žuti karton", icon: "🟨", color: "#FFD600", category: "discipline" },
+  RED_CARD: { id: "red_card", label: "Crveni karton", icon: "🟥", color: "#D50000", category: "discipline" },
+  SUSPENSION: { id: "suspension", label: "Isključenje 2min", icon: "⏱", color: "#FF1744", category: "discipline" },
+  PENALTY_GOAL: { id: "penalty_goal", label: "Gol iz 7m", icon: "🎯", color: "#76FF03", category: "penalty" },
+  PENALTY_MISS: { id: "penalty_miss", label: "Promašen 7m", icon: "❌", color: "#FF1744", category: "penalty" },
+  PENALTY_SAVE: { id: "penalty_save", label: "Odbranjen 7m", icon: "🧱", color: "#18FFFF", category: "penalty" },
+  FAST_BREAK: { id: "fast_break", label: "Kontranapad", icon: "⚡", color: "#EEFF41", category: "action" },
+  BREAKTHROUGH: { id: "breakthrough", label: "Prodor", icon: "🔥", color: "#FF9100", category: "action" },
+  TECHNICAL_FOUL: { id: "technical_foul", label: "Tehnički faul", icon: "📋", color: "#B388FF", category: "foul" },
+  PASSIVE_PLAY: { id: "passive_play", label: "Pasivna igra", icon: "🐢", color: "#A1887F", category: "action" },
+};
+
+const POSITIONS = ["LW", "LB", "CB", "RB", "RW", "P", "GK"];
+const POS_LABELS = { LW: "Lijevo krilo", LB: "Lijevi bek", CB: "Srednji bek", RB: "Desni bek", RW: "Desno krilo", P: "Pivot", GK: "Golman" };
+
+const T = {
+  bg: "#0A0E17", surface: "#111827", surface2: "#1A2332", surface3: "#222D3D",
+  border: "#2A3544", accent: "#06D6A0", accent2: "#118AB2", accent3: "#EF476F",
+  text: "#F0F4F8", textMuted: "#8899AA", textDim: "#556677",
+  gold: "#FFD166", danger: "#EF476F", success: "#06D6A0", warning: "#FFD166",
+};
+const mono = "'JetBrains Mono', monospace";
+const inputS = { background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, padding: "10px 12px", color: T.text, fontFamily: "'Outfit',sans-serif", fontSize: 13, outline: "none", width: "100%", boxSizing: "border-box" };
+const btnP = { background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`, border: "none", borderRadius: 12, color: "#fff", fontFamily: "'Outfit',sans-serif", fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "center" };
+const btnS = { background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 12, color: T.text, fontFamily: "'Outfit',sans-serif", fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "center" };
+const btnSm = { background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, padding: "5px 10px", color: T.text, fontFamily: "'Outfit',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer" };
+const thS = { textAlign: "center", padding: "6px 3px", fontWeight: 500 };
+const tdS = { textAlign: "center", padding: "6px 3px" };
+
+// ─── HEADER ──────────────────────────────────────────────────
+function Header({ title, onBack }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 0 12px" }}>
+      <button onClick={onBack} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", color: T.text, fontSize: 16, cursor: "pointer" }}>←</button>
+      <h2 style={{ fontSize: 18, fontWeight: 800, margin: 0 }}>{title}</h2>
+    </div>
+  );
+}
+
+// ─── HOME ────────────────────────────────────────────────────
+function HomeScreen({ matches, onNewMatch, onViewMatch, onManageTeams, onDeleteMatch }) {
+  return (
+    <div style={{ padding: "0 16px 100px", paddingTop: "env(safe-area-inset-top, 16px)" }}>
+      <div style={{ textAlign: "center", padding: "40px 0 24px" }}>
+        <div style={{ fontSize: 48, marginBottom: 8 }}>🤾</div>
+        <h1 style={{ fontSize: 28, fontWeight: 900, letterSpacing: "-0.5px", margin: 0, background: `linear-gradient(135deg, ${T.accent}, ${T.accent2})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>HandballStats</h1>
+        <p style={{ fontSize: 13, color: T.textMuted, margin: "6px 0 0", letterSpacing: "2px", textTransform: "uppercase", fontWeight: 500 }}>Pro Statistika</p>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 28 }}>
+        <button onClick={onNewMatch} style={{ ...btnP, padding: "18px 16px", fontSize: 15, fontWeight: 700, borderRadius: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 24 }}>🏟</span>Nova utakmica
+        </button>
+        <button onClick={onManageTeams} style={{ ...btnS, padding: "18px 16px", fontSize: 15, fontWeight: 700, borderRadius: 16, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 24 }}>👥</span>Timovi
+        </button>
+      </div>
+      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12, color: T.textMuted, textTransform: "uppercase", letterSpacing: "1.5px" }}>Posljednje utakmice</h2>
+      {matches.length === 0 ? (
+        <div style={{ background: T.surface, borderRadius: 16, padding: "40px 20px", textAlign: "center", border: `1px solid ${T.border}` }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+          <p style={{ color: T.textMuted, fontSize: 14, margin: 0 }}>Nema zabilježenih utakmica</p>
+          <p style={{ color: T.textDim, fontSize: 12, margin: "4px 0 0" }}>Započni novu utakmicu za praćenje statistike</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {matches.map(m => (
+            <div key={m.id} style={{ background: T.surface, borderRadius: 14, padding: 16, border: `1px solid ${T.border}`, cursor: "pointer" }} onClick={() => onViewMatch(m)}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontFamily: mono, color: T.textDim }}>{new Date(m.date).toLocaleDateString("sr-Latn")}</span>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 20, background: m.status === "finished" ? T.success + "22" : T.warning + "22", color: m.status === "finished" ? T.success : T.warning, fontWeight: 600 }}>{m.status === "finished" ? "Završena" : "U toku"}</span>
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 700 }}>
+                    {m.homeTeam.name} <span style={{ fontFamily: mono, fontSize: 18, color: T.accent, fontWeight: 800 }}>{m.homeTeam.score}</span>
+                    <span style={{ color: T.textDim, margin: "0 6px" }}>:</span>
+                    <span style={{ fontFamily: mono, fontSize: 18, color: T.accent3, fontWeight: 800 }}>{m.awayTeam.score}</span> {m.awayTeam.name}
+                  </div>
+                </div>
+                <button onClick={(e) => { e.stopPropagation(); if(confirm("Obriši utakmicu?")) onDeleteMatch(m.id); }} style={{ background: "none", border: "none", color: T.textDim, fontSize: 18, cursor: "pointer", padding: 4 }}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MATCH SETUP ─────────────────────────────────────────────
+function MatchSetup({ teams, onStart, onBack }) {
+  const [homeName, setHomeName] = useState("");
+  const [awayName, setAwayName] = useState("");
+  const [homePlayers, setHomePlayers] = useState([{ id: "h1", number: "", name: "", position: "CB" }]);
+  const [awayPlayers, setAwayPlayers] = useState([{ id: "a1", number: "", name: "", position: "CB" }]);
+  const [tab, setTab] = useState("home");
+
+  const addPlayer = (side) => {
+    const setter = side === "home" ? setHomePlayers : setAwayPlayers;
+    const prefix = side === "home" ? "h" : "a";
+    setter(prev => [...prev, { id: `${prefix}${Date.now()}`, number: "", name: "", position: "CB" }]);
+  };
+  const updatePlayer = (side, id, field, value) => {
+    const setter = side === "home" ? setHomePlayers : setAwayPlayers;
+    setter(prev => prev.map(p => p.id === id ? { ...p, [field]: value } : p));
+  };
+  const removePlayer = (side, id) => {
+    const setter = side === "home" ? setHomePlayers : setAwayPlayers;
+    setter(prev => prev.filter(p => p.id !== id));
+  };
+  const loadTeam = (side, team) => {
+    if (side === "home") { setHomeName(team.name); setHomePlayers(team.players.map((p, i) => ({ ...p, id: `h${i}` }))); }
+    else { setAwayName(team.name); setAwayPlayers(team.players.map((p, i) => ({ ...p, id: `a${i}` }))); }
+  };
+
+  const canStart = homeName.trim() && awayName.trim() && homePlayers.some(p => p.name.trim()) && awayPlayers.some(p => p.name.trim());
+  const handleStart = () => {
+    onStart({
+      id: `m_${Date.now()}`, date: new Date().toISOString(), status: "live", halfDuration: 30,
+      homeTeam: { name: homeName, score: 0, players: homePlayers.filter(p => p.name.trim()), timeouts: 3, timeoutsUsed: 0 },
+      awayTeam: { name: awayName, score: 0, players: awayPlayers.filter(p => p.name.trim()), timeouts: 3, timeoutsUsed: 0 },
+      events: [], currentHalf: 1, elapsedSeconds: 0,
+    });
+  };
+
+  const players = tab === "home" ? homePlayers : awayPlayers;
+
+  return (
+    <div style={{ padding: "0 16px 120px", paddingTop: "env(safe-area-inset-top, 16px)" }}>
+      <Header title="Nova utakmica" onBack={onBack} />
+      <div style={{ display: "flex", gap: 4, background: T.surface, borderRadius: 12, padding: 4, marginBottom: 16 }}>
+        {["home", "away"].map(t => (
+          <button key={t} onClick={() => setTab(t)} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", background: tab === t ? (t === "home" ? T.accent + "22" : T.accent3 + "22") : "transparent", color: tab === t ? (t === "home" ? T.accent : T.accent3) : T.textMuted, fontFamily: "'Outfit',sans-serif", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>{t === "home" ? "🏠 Domaći" : "✈ Gosti"}</button>
+        ))}
+      </div>
+      <input value={tab === "home" ? homeName : awayName} onChange={e => tab === "home" ? setHomeName(e.target.value) : setAwayName(e.target.value)} placeholder="Naziv tima" style={{ ...inputS, marginBottom: 8, fontSize: 16, fontWeight: 700 }} />
+      {teams.length > 0 && (
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          {teams.map(t => (
+            <button key={t.id} onClick={() => loadTeam(tab, t)} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.surface2, color: T.textMuted, fontFamily: "'Outfit',sans-serif", fontSize: 12, cursor: "pointer", fontWeight: 500 }}>📂 {t.name}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {players.map(p => (
+          <div key={p.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input value={p.number} onChange={e => updatePlayer(tab, p.id, "number", e.target.value)} placeholder="#" style={{ ...inputS, width: 44, textAlign: "center", fontFamily: mono, fontWeight: 700 }} />
+            <input value={p.name} onChange={e => updatePlayer(tab, p.id, "name", e.target.value)} placeholder="Ime igrača" style={{ ...inputS, flex: 1 }} />
+            <select value={p.position} onChange={e => updatePlayer(tab, p.id, "position", e.target.value)} style={{ ...inputS, width: 64, padding: "8px 4px", fontSize: 12 }}>
+              {POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+            </select>
+            {players.length > 1 && <button onClick={() => removePlayer(tab, p.id)} style={{ background: "none", border: "none", color: T.textDim, fontSize: 16, cursor: "pointer", padding: 4 }}>✕</button>}
+          </div>
+        ))}
+      </div>
+      <button onClick={() => addPlayer(tab)} style={{ ...btnS, marginTop: 10, padding: "10px 0", width: "100%", fontSize: 13 }}>+ Dodaj igrača</button>
+      <button disabled={!canStart} onClick={handleStart} style={{ ...btnP, marginTop: 24, padding: "16px 0", width: "100%", fontSize: 16, fontWeight: 800, opacity: canStart ? 1 : 0.4, borderRadius: 14 }}>🏟 Započni utakmicu</button>
+    </div>
+  );
+}
+
+// ─── LIVE MATCH ──────────────────────────────────────────────
+function LiveMatch({ match: initialMatch, onSave, onEnd }) {
+  const [match, setMatch] = useState(initialMatch);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [selectedSide, setSelectedSide] = useState("home");
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [eventCategory, setEventCategory] = useState("offense");
+  const [showEventPanel, setShowEventPanel] = useState(false);
+  const [undoStack, setUndoStack] = useState([]);
+  const [showStats, setShowStats] = useState(false);
+  const timerRef = useRef(null);
+  const autoSaveRef = useRef(null);
+
+  useEffect(() => {
+    if (timerRunning) { timerRef.current = setInterval(() => { setMatch(prev => ({ ...prev, elapsedSeconds: prev.elapsedSeconds + 1 })); }, 1000); }
+    else { clearInterval(timerRef.current); }
+    return () => clearInterval(timerRef.current);
+  }, [timerRunning]);
+
+  useEffect(() => {
+    autoSaveRef.current = setInterval(() => { onSave(match); }, 30000);
+    return () => clearInterval(autoSaveRef.current);
+  }, [match]);
+
+  const fmt = (s) => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+
+  const isTied = match.homeTeam.score === match.awayTeam.score;
+  const halfLabel = match.currentHalf === 1 ? "1. poluvrijeme" : match.currentHalf === 2 ? "2. poluvrijeme" : match.currentHalf === 3 ? "1. produžetak" : match.currentHalf === 4 ? "2. produžetak" : `Produžetak ${match.currentHalf - 2}`;
+
+  const addEvent = (eventType) => {
+    if (!selectedPlayer) return;
+    const event = {
+      id: `e_${Date.now()}`, type: eventType.id, label: eventType.label, icon: eventType.icon,
+      side: selectedSide, playerId: selectedPlayer?.id, playerName: selectedPlayer?.name, playerNumber: selectedPlayer?.number,
+      time: match.elapsedSeconds, half: match.currentHalf, timestamp: new Date().toISOString(),
+    };
+    const updated = { ...match, events: [...match.events, event] };
+    if (["goal", "penalty_goal"].includes(eventType.id)) {
+      if (selectedSide === "home") updated.homeTeam = { ...updated.homeTeam, score: updated.homeTeam.score + 1 };
+      else updated.awayTeam = { ...updated.awayTeam, score: updated.awayTeam.score + 1 };
+    }
+    setUndoStack(prev => [...prev, match]);
+    setMatch(updated);
+    setShowEventPanel(false);
+    setSelectedPlayer(null);
+  };
+
+  const addTimeout = (side) => {
+    const tk = side === "home" ? "homeTeam" : "awayTeam";
+    const team = match[tk];
+    if (team.timeoutsUsed >= team.timeouts) return;
+    const event = { id: `e_${Date.now()}`, type: "timeout", label: "Timeout", icon: "⏸", side, playerName: team.name, time: match.elapsedSeconds, half: match.currentHalf, timestamp: new Date().toISOString() };
+    setUndoStack(prev => [...prev, match]);
+    setMatch({ ...match, events: [...match.events, event], [tk]: { ...team, timeoutsUsed: team.timeoutsUsed + 1 } });
+  };
+
+  const undo = () => { if (!undoStack.length) return; setMatch(undoStack[undoStack.length - 1]); setUndoStack(prev => prev.slice(0, -1)); };
+
+  const nextHalf = () => {
+    setTimerRunning(false);
+    if (match.currentHalf === 1) { setMatch(prev => ({ ...prev, currentHalf: 2, elapsedSeconds: 0 })); }
+    else if (match.currentHalf >= 2 && isTied) { setMatch(prev => ({ ...prev, currentHalf: prev.currentHalf + 1, elapsedSeconds: 0 })); }
+  };
+
+  const handleEndMatch = () => {
+    setTimerRunning(false);
+    if (match.currentHalf >= 2 && isTied) {
+      if (confirm("Rezultat je neriješen! Želiš li produžetke (2x5min)?")) { setMatch(prev => ({ ...prev, currentHalf: 3, elapsedSeconds: 0 })); return; }
+    }
+    if (confirm("Završi utakmicu?")) onEnd(match);
+  };
+
+  const side = match[selectedSide === "home" ? "homeTeam" : "awayTeam"];
+  const categories = [
+    { id: "offense", label: "Napad", icon: "⚽" }, { id: "defense", label: "Odbrana", icon: "🛡" },
+    { id: "penalty", label: "7m", icon: "🎯" }, { id: "foul", label: "Faulovi", icon: "⚠" },
+    { id: "discipline", label: "Kartoni", icon: "🟨" }, { id: "action", label: "Akcije", icon: "⚡" },
+  ];
+
+  if (showStats) return <LiveStats match={match} onBack={() => setShowStats(false)} />;
+
+  return (
+    <div style={{ padding: "0 12px 120px", paddingTop: "env(safe-area-inset-top, 8px)" }}>
+      {/* Scoreboard */}
+      <div style={{ background: `linear-gradient(135deg, ${T.surface}, ${T.surface2})`, borderRadius: 18, padding: "14px 16px", marginBottom: 12, border: `1px solid ${T.border}` }}>
+        <div style={{ textAlign: "center", marginBottom: 6 }}>
+          <span style={{ fontSize: 11, color: match.currentHalf > 2 ? T.warning : T.textMuted, fontWeight: 600, letterSpacing: 1 }}>{halfLabel}{match.currentHalf > 2 ? " (5 min)" : " (30 min)"}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 16 }}>
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.accent, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{match.homeTeam.name}</div>
+            <div style={{ fontSize: 42, fontWeight: 900, fontFamily: mono, lineHeight: 1 }}>{match.homeTeam.score}</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+            <div style={{ fontFamily: mono, fontSize: 22, fontWeight: 700, color: timerRunning ? T.accent : T.textMuted, minWidth: 80, textAlign: "center" }}>{fmt(match.elapsedSeconds)}</div>
+            <button onClick={() => setTimerRunning(!timerRunning)} style={{ background: timerRunning ? T.danger + "33" : T.success + "33", border: "none", borderRadius: 8, padding: "6px 14px", color: timerRunning ? T.danger : T.success, fontSize: 16, cursor: "pointer" }}>{timerRunning ? "⏸" : "▶"}</button>
+          </div>
+          <div style={{ flex: 1, textAlign: "center" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: T.accent3, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{match.awayTeam.name}</div>
+            <div style={{ fontSize: 42, fontWeight: 900, fontFamily: mono, lineHeight: 1 }}>{match.awayTeam.score}</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, alignItems: "center" }}>
+          <button onClick={() => addTimeout("home")} style={{ ...btnSm, fontSize: 10 }}>⏸ TO ({match.homeTeam.timeouts - match.homeTeam.timeoutsUsed})</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={undo} disabled={!undoStack.length} style={{ ...btnSm, opacity: undoStack.length ? 1 : 0.3 }}>↩</button>
+            <button onClick={() => setShowStats(true)} style={btnSm}>📊</button>
+            <button onClick={nextHalf} style={btnSm}>⏭</button>
+            <button onClick={handleEndMatch} style={{ ...btnSm, color: T.danger }}>🏁</button>
+          </div>
+          <button onClick={() => addTimeout("away")} style={{ ...btnSm, fontSize: 10 }}>⏸ TO ({match.awayTeam.timeouts - match.awayTeam.timeoutsUsed})</button>
+        </div>
+      </div>
+
+      {/* Team Toggle */}
+      <div style={{ display: "flex", gap: 4, background: T.surface, borderRadius: 12, padding: 4, marginBottom: 10 }}>
+        {["home", "away"].map(s => (
+          <button key={s} onClick={() => { setSelectedSide(s); setSelectedPlayer(null); }} style={{ flex: 1, padding: "8px 0", borderRadius: 9, border: "none", background: selectedSide === s ? (s === "home" ? T.accent + "22" : T.accent3 + "22") : "transparent", color: selectedSide === s ? (s === "home" ? T.accent : T.accent3) : T.textMuted, fontFamily: "'Outfit',sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{match[s === "home" ? "homeTeam" : "awayTeam"].name}</button>
+        ))}
+      </div>
+
+      {/* Players */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 6, marginBottom: 12 }}>
+        {side.players.map(p => {
+          const isSel = selectedPlayer?.id === p.id;
+          const pe = match.events.filter(e => e.playerId === p.id);
+          const goals = pe.filter(e => ["goal","penalty_goal"].includes(e.type)).length;
+          const sus = pe.filter(e => e.type === "suspension").length;
+          return (
+            <button key={p.id} onClick={() => { setSelectedPlayer(isSel ? null : p); setShowEventPanel(!isSel); }} style={{ background: isSel ? (selectedSide === "home" ? T.accent + "22" : T.accent3 + "22") : T.surface, border: `1.5px solid ${isSel ? (selectedSide === "home" ? T.accent : T.accent3) : T.border}`, borderRadius: 12, padding: "10px 4px", cursor: "pointer", textAlign: "center" }}>
+              <div style={{ fontFamily: mono, fontSize: 18, fontWeight: 800, color: isSel ? (selectedSide === "home" ? T.accent : T.accent3) : T.text }}>#{p.number || "?"}</div>
+              <div style={{ fontSize: 10, color: T.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>{p.name}</div>
+              <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>{p.position}</div>
+              {(goals > 0 || sus > 0) && <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 4 }}>
+                {goals > 0 && <span style={{ fontSize: 9, background: T.success + "33", color: T.success, borderRadius: 4, padding: "1px 4px", fontFamily: mono }}>⚽{goals}</span>}
+                {sus > 0 && <span style={{ fontSize: 9, background: T.danger + "33", color: T.danger, borderRadius: 4, padding: "1px 4px", fontFamily: mono }}>⏱{sus}</span>}
+              </div>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Event Panel */}
+      {showEventPanel && selectedPlayer && (
+        <div style={{ background: T.surface, borderRadius: 16, padding: 14, border: `1px solid ${T.border}`, animation: "slideUp 0.2s ease" }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: selectedSide === "home" ? T.accent : T.accent3 }}>#{selectedPlayer.number} {selectedPlayer.name}</div>
+          <div style={{ display: "flex", gap: 4, overflowX: "auto", marginBottom: 10, paddingBottom: 4 }}>
+            {categories.map(c => (
+              <button key={c.id} onClick={() => setEventCategory(c.id)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${eventCategory === c.id ? T.accent : T.border}`, background: eventCategory === c.id ? T.accent + "18" : "transparent", color: eventCategory === c.id ? T.accent : T.textMuted, fontFamily: "'Outfit',sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 }}>{c.icon} {c.label}</button>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+            {Object.values(EVENT_TYPES).filter(e => e.category === eventCategory).map(et => (
+              <button key={et.id} onClick={() => addEvent(et)} style={{ background: et.color + "18", border: `1px solid ${et.color}44`, borderRadius: 10, padding: "12px 8px", cursor: "pointer", textAlign: "center", fontFamily: "'Outfit',sans-serif" }}>
+                <div style={{ fontSize: 20 }}>{et.icon}</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: et.color, marginTop: 4 }}>{et.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Event Log */}
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>Posljednji događaji</div>
+        {match.events.slice(-6).reverse().map(ev => (
+          <div key={ev.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: T.surface, borderRadius: 8, marginBottom: 4, border: `1px solid ${T.border}` }}>
+            <span style={{ fontSize: 16 }}>{ev.icon}</span>
+            <div style={{ flex: 1 }}><span style={{ fontSize: 11, fontWeight: 600 }}>{ev.label}</span>{ev.playerName && <span style={{ fontSize: 10, color: T.textMuted, marginLeft: 6 }}>#{ev.playerNumber} {ev.playerName}</span>}</div>
+            <span style={{ fontSize: 10, fontFamily: mono, color: T.textDim }}>{fmt(ev.time)}</span>
+            <span style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, background: ev.side === "home" ? T.accent + "22" : T.accent3 + "22", color: ev.side === "home" ? T.accent : T.accent3 }}>{ev.side === "home" ? "H" : "A"}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── LIVE STATS ──────────────────────────────────────────────
+function LiveStats({ match, onBack }) {
+  const [tab, setTab] = useState("summary");
+
+  const getTeamStats = (side) => {
+    const ev = match.events.filter(e => e.side === side);
+    return {
+      goals: ev.filter(e => ["goal","penalty_goal"].includes(e.type)).length,
+      shots: ev.filter(e => ["goal","shot_missed","shot_blocked","shot_post","penalty_goal","penalty_miss"].includes(e.type)).length,
+      saves: ev.filter(e => ["save","penalty_save"].includes(e.type)).length,
+      assists: ev.filter(e => e.type === "assist").length,
+      turnovers: ev.filter(e => e.type === "turnover").length,
+      steals: ev.filter(e => e.type === "steal").length,
+      blocks: ev.filter(e => e.type === "block").length,
+      yellowCards: ev.filter(e => e.type === "yellow_card").length,
+      redCards: ev.filter(e => e.type === "red_card").length,
+      suspensions: ev.filter(e => e.type === "suspension").length,
+      fastBreaks: ev.filter(e => e.type === "fast_break").length,
+      breakthroughs: ev.filter(e => e.type === "breakthrough").length,
+      foulsCommitted: ev.filter(e => e.type === "foul_committed").length,
+      penaltyGoals: ev.filter(e => e.type === "penalty_goal").length,
+      penaltyMiss: ev.filter(e => e.type === "penalty_miss").length,
+    };
+  };
+  const getPlayerStats = (side) => {
+    const tk = side === "home" ? "homeTeam" : "awayTeam";
+    return match[tk].players.map(p => {
+      const pe = match.events.filter(e => e.playerId === p.id);
+      return { ...p,
+        goals: pe.filter(e => ["goal","penalty_goal"].includes(e.type)).length,
+        assists: pe.filter(e => e.type === "assist").length,
+        shots: pe.filter(e => ["goal","shot_missed","shot_blocked","shot_post","penalty_goal","penalty_miss"].includes(e.type)).length,
+        saves: pe.filter(e => ["save","penalty_save"].includes(e.type)).length,
+        turnovers: pe.filter(e => e.type === "turnover").length,
+        steals: pe.filter(e => e.type === "steal").length,
+        yellowCards: pe.filter(e => e.type === "yellow_card").length,
+        suspensions: pe.filter(e => e.type === "suspension").length,
+        fouls: pe.filter(e => e.type === "foul_committed").length,
+      };
+    }).sort((a, b) => b.goals - a.goals || b.assists - a.assists);
+  };
+
+  const hs = getTeamStats("home"), as = getTeamStats("away");
+  const StatBar = ({ label, home, away }) => {
+    const total = home + away || 1;
+    return (
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+          <span style={{ fontFamily: mono, fontWeight: 700, color: T.accent }}>{home}</span>
+          <span style={{ color: T.textMuted, fontWeight: 500 }}>{label}</span>
+          <span style={{ fontFamily: mono, fontWeight: 700, color: T.accent3 }}>{away}</span>
+        </div>
+        <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", background: T.surface2 }}>
+          <div style={{ width: `${(home/total)*100}%`, background: T.accent }} />
+          <div style={{ width: `${(away/total)*100}%`, background: T.accent3, marginLeft: "auto" }} />
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: "0 12px 100px", paddingTop: "env(safe-area-inset-top, 8px)" }}>
+      <Header title="Statistika" onBack={onBack} />
+      <div style={{ display: "flex", gap: 4, background: T.surface, borderRadius: 10, padding: 3, marginBottom: 14 }}>
+        {[{id:"summary",label:"Pregled"},{id:"players",label:"Igrači"},{id:"timeline",label:"Timeline"}].map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: tab === t.id ? T.accent + "22" : "transparent", color: tab === t.id ? T.accent : T.textMuted, fontFamily: "'Outfit',sans-serif", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>{t.label}</button>
+        ))}
+      </div>
+      {tab === "summary" && (
+        <div style={{ background: T.surface, borderRadius: 14, padding: 16, border: `1px solid ${T.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, fontSize: 13, fontWeight: 700 }}>
+            <span style={{ color: T.accent }}>{match.homeTeam.name}</span>
+            <span style={{ color: T.accent3 }}>{match.awayTeam.name}</span>
+          </div>
+          <StatBar label="Golovi" home={hs.goals} away={as.goals} />
+          <StatBar label="Šutevi" home={hs.shots} away={as.shots} />
+          {(hs.shots>0||as.shots>0) && <StatBar label="Efikasnost (%)" home={hs.shots?Math.round((hs.goals/hs.shots)*100):0} away={as.shots?Math.round((as.goals/as.shots)*100):0} />}
+          <StatBar label="Odbrane" home={hs.saves} away={as.saves} />
+          <StatBar label="Asistencije" home={hs.assists} away={as.assists} />
+          <StatBar label="Ukradene lopte" home={hs.steals} away={as.steals} />
+          <StatBar label="Blokade" home={hs.blocks} away={as.blocks} />
+          <StatBar label="Izgubljene lopte" home={hs.turnovers} away={as.turnovers} />
+          <StatBar label="Kontranapadi" home={hs.fastBreaks} away={as.fastBreaks} />
+          <StatBar label="Prodori" home={hs.breakthroughs} away={as.breakthroughs} />
+          <StatBar label="Faulovi" home={hs.foulsCommitted} away={as.foulsCommitted} />
+          <StatBar label="Žuti kartoni" home={hs.yellowCards} away={as.yellowCards} />
+          <StatBar label="Isključenja 2min" home={hs.suspensions} away={as.suspensions} />
+          <StatBar label="Crveni kartoni" home={hs.redCards} away={as.redCards} />
+          <StatBar label="7m golovi" home={hs.penaltyGoals} away={as.penaltyGoals} />
+          <StatBar label="7m promašaji" home={hs.penaltyMiss} away={as.penaltyMiss} />
+        </div>
+      )}
+      {tab === "players" && (
+        <div>
+          {["home","away"].map(side => {
+            const ps = getPlayerStats(side);
+            const tn = match[side==="home"?"homeTeam":"awayTeam"].name;
+            return (
+              <div key={side} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: side==="home"?T.accent:T.accent3, marginBottom: 8 }}>{tn}</div>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: mono }}>
+                    <thead><tr style={{ color: T.textDim }}>
+                      <th style={{ textAlign: "left", padding: "6px 4px", fontWeight: 500 }}>#</th>
+                      <th style={{ textAlign: "left", padding: "6px 4px", fontWeight: 500 }}>Ime</th>
+                      <th style={thS}>G</th><th style={thS}>A</th><th style={thS}>Š</th><th style={thS}>%</th><th style={thS}>Od</th><th style={thS}>Uk</th><th style={thS}>Il</th><th style={thS}>F</th><th style={thS}>🟨</th><th style={thS}>⏱</th>
+                    </tr></thead>
+                    <tbody>{ps.map(p => (
+                      <tr key={p.id} style={{ borderTop: `1px solid ${T.border}` }}>
+                        <td style={{ padding: "6px 4px", fontWeight: 700 }}>{p.number}</td>
+                        <td style={{ padding: "6px 4px", fontFamily: "'Outfit',sans-serif", fontSize: 11, maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
+                        <td style={tdS}>{p.goals||""}</td><td style={tdS}>{p.assists||""}</td><td style={tdS}>{p.shots||""}</td><td style={tdS}>{p.shots?Math.round((p.goals/p.shots)*100):""}</td><td style={tdS}>{p.saves||""}</td><td style={tdS}>{p.steals||""}</td><td style={tdS}>{p.turnovers||""}</td><td style={tdS}>{p.fouls||""}</td><td style={tdS}>{p.yellowCards||""}</td><td style={tdS}>{p.suspensions||""}</td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ fontSize: 10, color: T.textDim, marginTop: 4 }}>G=Golovi A=Asist Š=Šutevi %=Efikasnost Od=Odbrane Uk=Ukradene Il=Izgubljene F=Faulovi</div>
+        </div>
+      )}
+      {tab === "timeline" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {match.events.length === 0 && <div style={{ textAlign: "center", padding: 30, color: T.textMuted, fontSize: 13 }}>Nema zabilježenih događaja</div>}
+          {[...match.events].reverse().map(ev => (
+            <div key={ev.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", background: T.surface, borderRadius: 8, border: `1px solid ${T.border}`, borderLeftWidth: 3, borderLeftColor: ev.side==="home"?T.accent:T.accent3 }}>
+              <span style={{ fontFamily: mono, fontSize: 11, color: T.textDim, minWidth: 40 }}>{Math.floor(ev.time/60)}'{String(ev.time%60).padStart(2,"0")}</span>
+              <span style={{ fontSize: 16 }}>{ev.icon}</span>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 600 }}>{ev.label}</div>{ev.playerName && <div style={{ fontSize: 10, color: T.textMuted }}>#{ev.playerNumber} {ev.playerName}</div>}</div>
+              <span style={{ fontSize: 9, padding: "2px 6px", borderRadius: 4, background: ev.side==="home"?T.accent+"22":T.accent3+"22", color: ev.side==="home"?T.accent:T.accent3, fontWeight: 600 }}>{ev.half <= 2 ? ev.half+". pol" : "Pr. "+(ev.half-2)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TEAM MANAGER ────────────────────────────────────────────
+function TeamManager({ teams, onSave, onBack }) {
+  const [name, setName] = useState("");
+  const [players, setPlayers] = useState([{ id: "t1", number: "", name: "", position: "CB" }]);
+  const [editing, setEditing] = useState(null);
+  const addPlayer = () => setPlayers(prev => [...prev, { id: `t${Date.now()}`, number: "", name: "", position: "CB" }]);
+  const updatePlayer = (id, field, val) => setPlayers(prev => prev.map(p => p.id === id ? { ...p, [field]: val } : p));
+  const removePlayer = (id) => setPlayers(prev => prev.filter(p => p.id !== id));
+  const save = async () => {
+    if (!name.trim()) return;
+    await onSave({ id: editing || `team_${Date.now()}`, name, players: players.filter(p => p.name.trim()) });
+    setName(""); setPlayers([{ id: "t1", number: "", name: "", position: "CB" }]); setEditing(null);
+  };
+  const loadForEdit = (t) => { setEditing(t.id); setName(t.name); setPlayers(t.players.map((p,i) => ({ ...p, id: `t${i}` }))); };
+
+  return (
+    <div style={{ padding: "0 16px 100px", paddingTop: "env(safe-area-inset-top, 16px)" }}>
+      <Header title="Upravljanje timovima" onBack={onBack} />
+      {teams.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>Sačuvani timovi</div>
+          {teams.map(t => (
+            <div key={t.id} onClick={() => loadForEdit(t)} style={{ background: T.surface, borderRadius: 12, padding: 14, marginBottom: 8, border: `1px solid ${T.border}`, cursor: "pointer" }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{t.name}</div>
+              <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{t.players.length} igrača: {t.players.map(p => `#${p.number} ${p.name}`).join(", ")}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ background: T.surface, borderRadius: 16, padding: 16, border: `1px solid ${T.border}` }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>{editing ? "Uredi tim" : "Novi tim"}</div>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Naziv tima" style={{ ...inputS, marginBottom: 10, fontSize: 15, fontWeight: 700 }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {players.map(p => (
+            <div key={p.id} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input value={p.number} onChange={e => updatePlayer(p.id, "number", e.target.value)} placeholder="#" style={{ ...inputS, width: 44, textAlign: "center", fontFamily: mono, fontWeight: 700 }} />
+              <input value={p.name} onChange={e => updatePlayer(p.id, "name", e.target.value)} placeholder="Ime igrača" style={{ ...inputS, flex: 1 }} />
+              <select value={p.position} onChange={e => updatePlayer(p.id, "position", e.target.value)} style={{ ...inputS, width: 64, padding: "8px 4px", fontSize: 12 }}>
+                {POSITIONS.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+              </select>
+              {players.length > 1 && <button onClick={() => removePlayer(p.id)} style={{ background: "none", border: "none", color: T.textDim, fontSize: 16, cursor: "pointer" }}>✕</button>}
+            </div>
+          ))}
+        </div>
+        <button onClick={addPlayer} style={{ ...btnS, marginTop: 10, width: "100%", padding: "10px 0", fontSize: 12 }}>+ Dodaj igrača</button>
+        <button onClick={save} disabled={!name.trim()} style={{ ...btnP, marginTop: 10, width: "100%", padding: "12px 0", fontSize: 14, fontWeight: 700, opacity: name.trim() ? 1 : 0.4 }}>💾 Sačuvaj tim</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ─────────────────────────────────────────────────────
+function App() {
+  const [screen, setScreen] = useState("home");
+  const [matches, setMatches] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [currentMatch, setCurrentMatch] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { (async () => { setMatches(await DB.getAllMatches()); setTeams(await DB.getAllTeams()); setLoading(false); })(); }, []);
+  const refresh = async () => { setMatches(await DB.getAllMatches()); setTeams(await DB.getAllTeams()); };
+
+  const startMatch = (m) => { setCurrentMatch(m); setScreen("live"); };
+  const endMatch = async (m) => { await DB.saveMatch({ ...m, status: "finished" }); await refresh(); setCurrentMatch(null); setScreen("home"); };
+
+  if (loading) return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+      <div style={{ width: 48, height: 48, border: `3px solid ${T.border}`, borderTopColor: T.accent, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      <span style={{ fontSize: 14, color: T.textMuted }}>Učitavanje...</span>
+    </div>
+  );
+
+  return (
+    <div style={{ background: T.bg, color: T.text, minHeight: "100vh", maxWidth: 480, margin: "0 auto", position: "relative", overflow: "hidden" }}>
+      {screen === "home" && <HomeScreen matches={matches} onNewMatch={() => setScreen("setup")} onViewMatch={(m) => { setCurrentMatch(m); setScreen("review"); }} onManageTeams={() => setScreen("teams")} onDeleteMatch={async (id) => { await DB.deleteMatch(id); await refresh(); }} />}
+      {screen === "setup" && <MatchSetup teams={teams} onStart={startMatch} onBack={() => setScreen("home")} />}
+      {screen === "live" && <LiveMatch match={currentMatch} onSave={async (m) => { await DB.saveMatch(m); }} onEnd={endMatch} />}
+      {screen === "review" && <LiveStats match={currentMatch} onBack={() => { setCurrentMatch(null); setScreen("home"); }} />}
+      {screen === "teams" && <TeamManager teams={teams} onSave={async (t) => { await DB.saveTeamTemplate(t); await refresh(); }} onBack={() => setScreen("home")} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
